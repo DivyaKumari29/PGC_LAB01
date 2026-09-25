@@ -1,110 +1,139 @@
-# Lab Report: Matrix Multiplication Using Multiple Models
+# Performance Analysis of Matrix Multiplication Across Parallel Computing Models
 
-## Aim
-To multiply two large **4000 × 4000** matrices using four different computing models — Sequential, OpenMP, MPI, and CUDA — and compare how fast each model performs the same task.
+**Repository:** [PGC_LAB01](https://github.com/DivyaKumari29/PGC_LAB01)
 
-## What was done
-The same matrix multiplication problem (`C = A x B`) was solved four separate times, once with each model. In every case, Matrix A and Matrix B were filled entirely with `1.0`. This makes the correct answer easy to verify: every cell of the result matrix should equal **4000.00**. If a program prints that number, its calculation is correct.
+## Overview
+
+This repository presents an empirical performance study of dense matrix multiplication (`C = A × B`) on a **4000 × 4000** matrix pair, implemented and benchmarked across four distinct computing paradigms:
+
+1. **Sequential** — single-core CPU execution (baseline)
+2. **OpenMP** — shared-memory, multi-threaded CPU execution
+3. **MPI** — distributed-memory execution across a networked cluster
+4. **CUDA** — massively parallel GPU execution
+
+The objective is to quantify the performance gains achieved when the same computational workload is migrated from a single CPU core to multi-core, multi-machine, and GPU-based execution environments.
 
 ```mermaid
 flowchart LR
-    A["Two 4000x4000 matrices\n(filled with 1.0)"] --> B["Same multiplication run\nusing 4 different models"]
-    B --> C["Check the answer\nC[0][0] = 4000.00"]
-    B --> D["Record and compare\nexecution time"]
+    A["Two 4000x4000 matrices\n(A = 1.0, B = 1.0)"] --> B["Same multiplication executed\nunder 4 parallel models"]
+    B --> C["Correctness check\nC[0][0] = 4000.00"]
+    B --> D["Execution time recorded\nand compared"]
 ```
 
----
+## Objectives
 
-## The four models used
+- **Multi-model parallelization** — implement a uniform 4000 × 4000 matrix multiplication workload across Sequential, OpenMP, MPI, and CUDA.
+- **Correctness verification** — use identical matrix initialization (`A[i][j] = 1.0`, `B[i][j] = 1.0`) across all implementations so that every result can be checked against the expected value `C[0][0] = 4000.00`.
+- **Performance evaluation** — quantify the speedup obtained by moving from single-core execution to shared-memory (OpenMP), distributed-memory (MPI), and SIMT GPU (CUDA) execution.
+- **Overhead analysis** — examine network communication latency in the MPI cluster and host-to-device / device-to-host memory transfer overhead in CUDA.
 
-| # | Model | What it means |
-|---|--------|------------------|
-| 1 | **Sequential** | One CPU core does the entire calculation, one step at a time. Used as the baseline to compare the rest against. |
-| 2 | **OpenMP** | The same computer splits the work across **8 threads** that share one memory space. |
-| 3 | **MPI** | The work is split across **4 separate machines** (VMs) that communicate over a network. |
-| 4 | **CUDA** | The work is handed to a **GPU**, which runs millions of small calculations at the same time. |
+## Workload Specification
 
----
+| Parameter | Value |
+|---|---|
+| Matrix dimension (N) | 4000 × 4000 |
+| Matrix A | `A[i][j] = 1.0` for all i, j |
+| Matrix B | `B[i][j] = 1.0` for all i, j |
+| Operation | `C[i][j] = Σ (A[i][k] × B[k][j])`, k = 0 to N−1 |
+| Expected verification value | `C[0][0] = 4000.00` |
 
-## How each model works
+## Computing Models
 
-### 1. Sequential Model
-A simple triple loop (`for i, for j, for k`) runs on a single CPU core with no parallel execution. This gives the baseline execution time.
+### 1. Sequential
+A single-threaded, triple-nested loop (`O(N³)` complexity) running on one CPU core with no hardware concurrency. Used as the performance baseline.
 
-### 2. OpenMP Model
-A single directive, `#pragma omp parallel for`, is placed above the main loop. This splits the loop's iterations across 8 CPU threads. Since all threads share the same memory, no data needs to be copied between them.
+### 2. OpenMP (Shared Memory)
+The `#pragma omp parallel for` directive forks **8 worker threads** that share a single unified memory address space, dividing loop iterations dynamically across CPU cores. No explicit data copying is required between threads.
 
-### 3. MPI Model
-Four Ubuntu virtual machines — one **Master** and three **Workers** — were set up with matching hostnames, SSH access, and Open MPI. The program then:
-1. **Scatters** Matrix A — the Master splits it into 4 chunks (1000 rows each) and sends one chunk to each machine (`MPI_Scatter`).
-2. **Broadcasts** Matrix B — the full matrix is copied to all 4 machines, since every machine needs all of it (`MPI_Bcast`).
-3. **Computes** — each machine multiplies its own 1000 rows at the same time as the others.
-4. **Gathers** the results — the Master collects all 4 pieces back into one complete matrix (`MPI_Gather`).
+### 3. MPI (Distributed Memory)
+Executed across **4 Ubuntu virtual machines** (one Master, three Workers) connected over a network, configured with matching hostnames, SSH access, and Open MPI:
 
-Because the 4 machines do not share memory, every piece of data is passed explicitly between them. This is what makes it a "distributed" model.
+1. **Scatter** — Matrix A is partitioned into 4 sub-blocks (1000 rows each) and distributed via `MPI_Scatter`.
+2. **Broadcast** — Matrix B is duplicated in full to all ranks via `MPI_Bcast`.
+3. **Compute** — each rank multiplies its assigned rows concurrently.
+4. **Gather** — partial results are collected back into the complete matrix on the Master via `MPI_Gather`.
 
-### 4. CUDA Model
-Matrix A and Matrix B are copied from normal computer memory onto the GPU's memory. The GPU then launches **16 million threads** (one per output cell), arranged into a grid of blocks, and every thread calculates its own result value at the same time. The finished matrix is copied back to the computer.
+Since the ranks do not share memory, all data exchange is explicit — the defining property of the distributed-memory model.
 
----
+### 4. CUDA (Massively Parallel SIMT)
+Matrices A and B are transferred from host to device memory over PCIe. The kernel is launched across a 2D execution grid:
+
+| Configuration | Value |
+|---|---|
+| Grid | 250 × 250 = 62,500 blocks |
+| Block | 16 × 16 = 256 threads/block |
+| Total logical GPU threads | 16,000,000 |
+
+Each thread computes one output cell independently; the result matrix is then copied back to host memory.
 
 ## Results
 
-Matrix size for every model: **4000 × 4000**. Verification result for every model: **C[0][0] = 4000.00** (correct).
+All four models were executed on the same 4000 × 4000 workload and passed verification (`C[0][0] = 4000.00`).
 
 | Model | Execution Time | Speedup vs. Sequential |
 |---|---|---|
-| Sequential (1 CPU core) | 244.12 seconds | 1× (baseline) |
-| MPI (4 machines) | 92.98 seconds | ~2.6× faster |
-| OpenMP (8 threads) | 30.83 seconds | ~7.9× faster |
-| CUDA (GPU) | 0.165 seconds | ~1,479× faster |
+| Sequential (1 CPU core) | 244.12 s | 1× (baseline) |
+| MPI (4 machines) | 92.98 s | ~2.6× |
+| OpenMP (8 threads) | 30.83 s | ~7.9× |
+| CUDA (GPU) | 0.165 s (0.146 s kernel) | ~1,479.5× |
 
-### Execution time and speedup, side by side
-![Performance Comparison Charts](images/performance_comparison_charts.png)
+CUDA additionally achieved a **~186.9× speedup** over the OpenMP implementation.
 
-### Execution time only
-![Execution Time Chart](images/execution_time_chart.png)
+### Visualizations
 
-### Speedup only
-![Speedup Chart](images/speedup_chart.png)
-
----
-
-## Observation
-The GPU (CUDA) finished fastest by a large margin, since it runs millions of small calculations in parallel hardware. OpenMP came next, because sharing memory between 8 threads on one machine has almost no extra cost. MPI was slower than OpenMP because sending matrix data between 4 separate machines over a network takes real time. The Sequential model was the slowest, since a single core had to do all the work alone.
-
----
-
-## Proof of execution (screenshots)
-
-| What it shows | Screenshot |
+| Chart | Preview |
 |---|---|
-| Sequential program finishing with the correct result | ![Sequential result](images/sequential_result.png) |
-| OpenMP using all 8 CPU threads (seen in `htop`) | ![OpenMP htop](images/openmp_htop.png) |
-| The 4 MPI machines successfully pinging each other | ![MPI ping test](images/mpi_ping.png) |
-| A test message sent from one MPI machine to another | ![MPI send/receive](images/mpi_send_recv.png) |
-| The full MPI program finishing with the correct result | ![MPI result](images/mpi_result.png) |
+| Execution time and speedup (combined) | ![Performance Comparison](images/performance_comparison_charts.png) |
+| Execution time only | ![Execution Time](images/execution_time_chart.png) |
+| Speedup only | ![Speedup](images/speedup_chart.png) |
 
----
+## Discussion
 
-## Repository contents
+- **CUDA** delivered the largest performance gain by a wide margin, as it distributes the workload across millions of concurrent GPU threads.
+- **OpenMP** performed second-best; sharing memory across 8 threads on a single machine introduces minimal overhead.
+- **MPI** underperformed relative to OpenMP because inter-machine communication over the network (scatter/broadcast/gather) adds real, measurable latency.
+- **Sequential** execution was the slowest, as the entire workload was processed by a single CPU core with no concurrency.
+
+## Evidence of Execution
+
+| Description | Screenshot |
+|---|---|
+| Sequential run completing with the correct result | ![Sequential result](images/sequential_result.png) |
+| OpenMP utilizing all 8 CPU threads (`htop`) | ![OpenMP htop](images/openmp_htop.png) |
+| MPI cluster connectivity test (ping) | ![MPI ping test](images/mpi_ping.png) |
+| MPI point-to-point send/receive test | ![MPI send/receive](images/mpi_send_recv.png) |
+| MPI program completing with the correct result | ![MPI result](images/mpi_result.png) |
+
+## Repository Structure
 
 ```
 ├── src/
-│   ├── sequential/matrix_sequential.c   # Model 1: one core, one thread
-│   ├── openmp/matrix_openmp.c           # Model 2: 8 threads, shared memory
-│   ├── mpi/matrix_mpi.c                 # Model 3: 4-machine main program
-│   ├── mpi/mpi_send_recv.c              # Model 3: basic test - send 1 number between machines
-│   └── mpi/hosts                        # Model 3: list of the 4 machine names for MPI
-│   └── cuda/matrix_cuda.cu              # Model 4: GPU program
-├── images/                              # Screenshots and charts referenced in this report
-├── scripts/generate_charts.py           # Script used to draw the charts above
-└── README.md                            # This report
+│   ├── sequential/matrix_sequential.c   # Model 1: single-core baseline
+│   ├── openmp/matrix_openmp.c           # Model 2: 8-thread shared memory
+│   ├── mpi/matrix_mpi.c                 # Model 3: 4-machine distributed program
+│   ├── mpi/mpi_send_recv.c              # Model 3: point-to-point communication test
+│   └── mpi/hosts                        # Model 3: MPI hostfile
+│   └── cuda/matrix_cuda.cu              # Model 4: GPU kernel program
+├── images/                              # Screenshots and charts referenced in this document
+├── scripts/generate_charts.py           # Script used to generate the charts above
+└── README.md                            # This document
 ```
 
----
+## Source Code Reference
 
-## How to run each model
+| Computing Paradigm | Source File | Description |
+|---|---|---|
+| Sequential CPU | [`src/sequential/matrix_sequential.c`](https://github.com/DivyaKumari29/PGC_LAB01/blob/main/src/sequential/matrix_sequential.c) | Baseline O(N³) triple-nested loop |
+| OpenMP | [`src/openmp/matrix_openmp.c`](https://github.com/DivyaKumari29/PGC_LAB01/blob/main/src/openmp/matrix_openmp.c) | `#pragma omp parallel for` shared-memory multi-threading |
+| MPI (Distributed) | [`src/mpi/matrix_mpi.c`](https://github.com/DivyaKumari29/PGC_LAB01/blob/main/src/mpi/matrix_mpi.c) | `MPI_Scatter`, `MPI_Bcast`, `MPI_Gather` distributed execution |
+| MPI (Test) | [`src/mpi/mpi_send_recv.c`](https://github.com/DivyaKumari29/PGC_LAB01/blob/main/src/mpi/mpi_send_recv.c) | Point-to-point `MPI_Send` / `MPI_Recv` test |
+| MPI Hostfile | [`src/mpi/hosts`](https://github.com/DivyaKumari29/PGC_LAB01/blob/main/src/mpi/hosts) | List of the 4 cluster machine names |
+| CUDA GPU | [`src/cuda/matrix_cuda.cu`](https://github.com/DivyaKumari29/PGC_LAB01/blob/main/src/cuda/matrix_cuda.cu) | `matMulKernel<<<grid, block>>>` with 16 million GPU threads |
+| Chart Generator | [`scripts/generate_charts.py`](https://github.com/DivyaKumari29/PGC_LAB01/blob/main/scripts/generate_charts.py) | Script used to produce the performance charts |
+
+> **Note:** Links assume the default branch is named `main`. If the repository's default branch differs, replace `main` in the URLs above accordingly.
+
+## Build and Run Instructions
 
 ### 1. Sequential
 ```bash
@@ -118,33 +147,34 @@ gcc -fopenmp matrix_openmp.c -o matrix_openmp
 ./matrix_openmp
 ```
 
-### 3. MPI (requires 4 networked machines with SSH + Open MPI already installed)
+### 3. MPI
+Requires 4 networked machines with SSH access and Open MPI pre-installed.
 ```bash
-# compile on the Master machine
+# Compile on the Master machine
 mpicc matrix_mpi.c -o matrix_mpi
 
-# copy the program to the other 3 machines
+# Copy the compiled program to each Worker
 scp matrix_mpi worker1:~/
 scp matrix_mpi worker2:~/
 scp matrix_mpi worker3:~/
 
-# run it across all 4 machines
+# Run across all 4 machines
 mpirun -np 4 --hostfile hosts ./matrix_mpi
 ```
 
-### 4. CUDA (requires an NVIDIA GPU + CUDA Toolkit)
+### 4. CUDA
+Requires an NVIDIA GPU and the CUDA Toolkit.
 ```bash
 nvcc matrix_cuda.cu -o matrix_cuda
 ./matrix_cuda
 ```
 
-### Regenerate the charts
+### Regenerating the Charts
 ```bash
 pip install matplotlib numpy
 python3 scripts/generate_charts.py
 ```
 
----
-
 ## Conclusion
-All four models solved the same matrix multiplication problem and produced the same correct result (`4000.00`). The difference between them was purely in **how the work was divided** — one core, many threads on one machine, many separate machines, or thousands of GPU threads — and that difference is what changed the execution time from over 4 minutes down to under a fifth of a second.
+
+All four implementations solved the same matrix multiplication problem and produced the same verified result (`C[0][0] = 4000.00`). The sole variable across implementations was **how the workload was distributed** — one core, eight shared-memory threads, four networked machines, or sixteen million GPU threads — and this distribution strategy alone accounted for the difference in execution time, from over four minutes (Sequential) down to under a fifth of a second (CUDA).
