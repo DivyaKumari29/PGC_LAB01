@@ -379,9 +379,10 @@ MPI efficiency = 2.63 / 4       = 65.6%
 | ![MPI ping test](images/mpi_ping.png) | Connectivity check between MPI nodes |
 | ![MPI send and receive](images/mpi_send_recv.png) | `MPI_Send` / `MPI_Recv` test across the cluster |
 | ![MPI result](images/mpi_result.png) | Full MPI matrix multiplication run |
-| ![CUDA result](images/cuda_result.png) | `nvidia-smi` and CUDA program output |
+| ![CUDA result](<img width="1536" height="961" alt="WhatsApp Image 2026-10-07 at 6 22 53 PM" src="https://github.com/user-attachments/assets/4b913033-39ff-41d2-b468-2cce55e35ac8" />
+)
 
-> 📸 **Note:** Drop your actual screenshot files into `images/` using these exact filenames and they'll render automatically on GitHub.
+
 
 ## 12. Troubleshooting
 
